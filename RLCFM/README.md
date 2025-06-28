@@ -63,7 +63,7 @@ This paper introduces two key innovations that significantly advance the efficie
 
 
 
-![Qualitative comparisons with LoRA-based approaches on SDXL architecture](asset/combined_00.png)
+![Qualitative comparisons with LoRA-based approaches on SDXL architecture](asset/combined.png)
 
 
 
