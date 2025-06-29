@@ -1,7 +1,7 @@
 # RLCFM: A Reinforcement Learning Framework for High-Efficiency Consistency Flow Matching
 
 
-Bohan Li,Guhan Chen,Songtao Tian,Zixiong Yu
+Songtao Tian,Guhan Chen,Bohan Li,Zixiong Yu
 
 <!-- Preprint, under review -->
 
