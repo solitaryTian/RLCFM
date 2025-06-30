@@ -1,16 +1,6 @@
 # RLCFM: A Reinforcement Learning Framework for High-Efficiency Consistency Flow Matching
 
 
-Songtao Tian,Guhan Chen,Bohan Li,Zixiong Yu
-
-<!-- Preprint, under review -->
-
-## Abstract
-
-Serval methods such as consistency models have made significant progress in accelerating the
-generation of diffusion models such as stable diffusion XL. However, these methods suffers from  performance degradation on large-scale flow-based text-to-image
-Diffusion models, such as SD 3.5 and FLUX.
-This paper introduces two key innovations that significantly advance the efficiency  of flow matching (FM) generative models. First, we propose a reinforcement learning (RL)-guided framework that dynamically optimizes sub-trajectory index selection in  Consistency Flow  Matching  (CFM) models. By leveraging RL to adaptively prioritize high-impact sub-trajectories, our approach accelerates convergence while maintaining the consistency and controllability benefits of flow matching models. Second, we integrate the Distribution Matching Distillation (DMD) loss into the RLCFM training objective, unifying the advantages of CFM with distribution-level alignment. This hybrid loss function enhances sample fidelity, effectively bridging the quality gap between distilled and original FM models. Extensive experiments on text-to-image generation benchmarks demonstrate state-of-the-art performance: our method outperforms all existing accelerated diffusion approaches in FID and other evaluation methods. The proposed framework establishes a new paradigm for efficient, high-fidelity generative modeling, with broad applicability to real-time content creation.
 
 
 
