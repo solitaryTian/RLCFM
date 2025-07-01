@@ -69,7 +69,7 @@
 - Clone this repository.
 ```shell
 git clone https://github.com/RedAIGC/Target-Driven-Distillation.git
-cd Target-Driven-Distillation
+cd RLCFM
 conda create -n RLPCM python=3.10 
 conda activate RLPCM
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple 
