@@ -68,7 +68,7 @@
 
 - Clone this repository.
 ```shell
-git clone https://github.com/RedAIGC/Target-Driven-Distillation.git
+git clone https://github.com/solitaryTian/RLCFM.git
 cd RLCFM
 conda create -n RLPCM python=3.10 
 conda activate RLPCM
