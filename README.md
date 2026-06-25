@@ -2,7 +2,7 @@
 
 Official research code for **Curvature-Adaptive Consistency Flow Matching:
 Autonomous Trajectory Optimization via Reinforcement Learning**
-([arXiv:2606.22394](https://arxiv.org/abs/2606.22394)).
+(**ECCV 2026 Accepted**, [arXiv:2606.22394](https://arxiv.org/abs/2606.22394)).
 
 Consistency distillation accelerates diffusion and flow-matching models, but
 static timestep priors do not match the difficulty profile of few-step
@@ -15,6 +15,7 @@ large-scale FLUX and SDXL backbones.
 
 <p align="center">
   <a href="https://arxiv.org/abs/2606.22394"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2606.22394-b31b1b.svg"></a>
+  <img alt="ECCV 2026" src="https://img.shields.io/badge/ECCV-2026%20Accepted-2ea44f.svg">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.10-blue.svg">
   <img alt="PyTorch" src="https://img.shields.io/badge/PyTorch-2.x-ee4c2c.svg">
   <img alt="Diffusers" src="https://img.shields.io/badge/HuggingFace-Diffusers-yellow.svg">
@@ -328,7 +329,7 @@ If you find this repository useful, please cite:
 @article{tian2026curvature,
   title={Curvature-Adaptive Consistency Flow Matching: Autonomous Trajectory Optimization via Reinforcement Learning},
   author={Tian, Songtao and Chen, Guhan and Li, Bohan and Ma, Jingyi and Yu, Zixiong},
-  journal={arXiv preprint arXiv:2606.22394},
+  journal={European Conference on Computer Vision (ECCV)},
   year={2026}
 }
 ```
