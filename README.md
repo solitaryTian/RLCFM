@@ -58,37 +58,6 @@ improvement over a moving baseline.
   <img src="assets/training_paradigm.png" width="88%" alt="CACFM training paradigm">
 </p>
 
-## Repository Structure
-
-```text
-.
-├── FLUX/
-│   ├── test_image_flux.py
-│   ├── train_tdd_adv.py
-│   ├── train_tdd_adv.sh
-│   ├── pcm_scheduling_flowmatch_modified.py
-│   ├── pcm_discriminator_flux.py
-│   └── dataset_myself.py
-├── SDXL/
-│   ├── train_pcm_base_model_sdxl_adv_RL.py
-│   ├── train_pcm_base_model_sdxl_RL_dmd.sh
-│   ├── DMD_loss.py
-│   ├── discriminator_sdxl.py
-│   ├── scheduling_ddpm_modified.py
-│   └── get_phased_weight.py
-├── assets/
-│   ├── teaser_flux_4step.png
-│   ├── comparison_flux.png
-│   ├── comparison_sdxl.png
-│   ├── concept_u_shape.png
-│   ├── training_paradigm.png
-│   ├── policy_alignment.png
-│   ├── policy_curriculum.png
-│   └── q_table_convergence.png
-├── requirements.txt
-└── README.md
-```
-
 ## Installation
 
 The experiments were developed with Python 3.10, PyTorch, Hugging Face
