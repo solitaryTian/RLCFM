@@ -1,4 +1,4 @@
-# RLCFM / CACFM: Curvature-Adaptive Consistency Flow Matching
+# CACFM: Curvature-Adaptive Consistency Flow Matching
 
 Official research code for **Curvature-Adaptive Consistency Flow Matching:
 Autonomous Trajectory Optimization via Reinforcement Learning**
@@ -95,8 +95,8 @@ The experiments were developed with Python 3.10, PyTorch, Hugging Face
 Diffusers, Accelerate, and PEFT.
 
 ```bash
-git clone https://github.com/solitaryTian/RLCFM.git
-cd RLCFM
+git clone https://github.com/solitaryTian/CACFM.git
+cd CACFM
 
 conda create -n rlcfm python=3.10 -y
 conda activate rlcfm
