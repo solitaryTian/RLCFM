@@ -196,8 +196,8 @@ bash train_pcm_base_model_sdxl_RL_dmd.sh
 
 This launcher enables:
 
-- RL trajectory weighting through `--RL_epsilon`
-- DMD loss through `--dmd_loss` and `--dmd_weight`
+- tabular Q-learning trajectory routing with epsilon decay
+- DMD loss through `--dmd_loss` and `--dmd_weight=0.5`
 - adversarial refinement through `--adv_weight`
 - LoRA training through `--lora_rank`
 - memory-saving options such as fp16, xFormers, 8-bit Adam, and gradient
@@ -210,8 +210,14 @@ cd FLUX
 bash train_tdd_adv.sh
 ```
 
-This launcher trains a FLUX LoRA model with adversarial consistency refinement
-and configurable few-step inference ranges.
+This launcher enables the FLUX CACFM training path:
+
+- tabular Q-learning over four trajectory stages
+- epsilon decay from `1.0` to `0.1` over the first 20K RL updates
+- Flow-style DMD loss through `--dmd_loss` and `--dmd_weight=0.5`
+- adversarial consistency refinement through `--adv_weight`
+- configurable few-step inference ranges through `--num_inference_steps_min`
+  and `--num_inference_steps_max`
 
 ## Results
 

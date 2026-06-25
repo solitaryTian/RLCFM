@@ -1,6 +1,7 @@
 export TRAIN_SHARDS_PATH_OR_URL="/data/code/songtao.tian/data/niji/image_info_20250616.json"
 export PRETRAINED_TEACHER_MODEL="/data/code/guanyu.zhao/models/FLUX.1-dev"
 export OUTPUT_DIR='outputs/TDD_flux_niji_random_0_3_proportion_empty_prompts_0.2'
+export DMD_WEIGHT=0.5
 # 
 # 
 # python  train_tdd_adv.py \
@@ -31,5 +32,10 @@ accelerate launch --config_file=config.yaml train_tdd_adv.py \
     --s_ratio=0.0 \
     --adv_lr=1e-5 \
     --adv_weight=0.1 \
+    --multiphase=4 \
+    --RL_epsilon_start=1.0 \
+    --RL_epsilon_final=0.1 \
+    --RL_epsilon_decay_steps=20000 \
+    --dmd_weight=$DMD_WEIGHT \
+    --dmd_loss \
     --resume_from_checkpoint=latest \
-

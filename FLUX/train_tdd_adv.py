@@ -83,6 +83,110 @@ check_min_version("0.30.2")
 logger = get_logger(__name__)
 
 
+class QLearning:
+    def __init__(self, n_state, epsilon, alpha, gamma, n_action=4):
+        self.Q_table = np.zeros([n_state, n_action])
+        self.n_action = n_action
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+
+    def take_action(self, state):
+        if np.random.random() < self.epsilon:
+            return np.random.randint(self.n_action), "random"
+        return int(np.argmax(self.Q_table[state])), ""
+
+    def update(self, s0, a0, r, s1):
+        td_error = r + self.gamma * self.Q_table[s1].max() - self.Q_table[s0, a0]
+        self.Q_table[s0, a0] += self.alpha * td_error
+
+
+def get_rank(values):
+    indexed_values = [(value, idx) for idx, value in enumerate(values)]
+    sorted_values = sorted(indexed_values, key=lambda x: x[0])
+    rank = [0] * len(values)
+    for i, (_, idx) in enumerate(sorted_values):
+        rank[idx] = i
+    perms = list(itertools.permutations(range(len(values))))
+    mapping = {p: i for i, p in enumerate(perms)}
+    return mapping[tuple(rank)]
+
+
+def get_decayed_epsilon(start, final, decay_steps, step):
+    if decay_steps <= 0:
+        return final
+    progress = min(max(step, 0), decay_steps) / decay_steps
+    return start + (final - start) * progress
+
+
+def sample_indices_from_phase(batch_size, action, num_euler_timesteps, num_phases, device):
+    phase_size = max(num_euler_timesteps // num_phases, 1)
+    start = action * phase_size
+    end = num_euler_timesteps if action == num_phases - 1 else min((action + 1) * phase_size, num_euler_timesteps)
+    return torch.randint(start, end, (batch_size,), device=device).long()
+
+
+def update_phase_losses(existing_data, num_phases):
+    sums = [0.0] * num_phases
+    counts = [0] * num_phases
+    for item in existing_data:
+        for phase, loss in zip(item["phase"], item["loss"]):
+            sums[phase] += loss
+            counts[phase] += 1
+    fallback = sum(sums) / max(sum(counts), 1)
+    return [sums[i] / counts[i] if counts[i] else fallback for i in range(num_phases)]
+
+
+def compute_flux_distribution_matching_loss(
+    transformer,
+    real_transformer,
+    noisy_latents,
+    clean_latents,
+    timesteps,
+    sigmas,
+    guidance,
+    pooled_prompt_embeds,
+    prompt_embeds,
+    text_ids,
+    latent_image_ids,
+):
+    fake_velocity = transformer(
+        hidden_states=noisy_latents,
+        timestep=timesteps / 1000,
+        guidance=guidance,
+        pooled_projections=pooled_prompt_embeds,
+        encoder_hidden_states=prompt_embeds,
+        txt_ids=text_ids,
+        img_ids=latent_image_ids,
+        return_dict=False,
+    )[0]
+    with torch.no_grad():
+        if hasattr(real_transformer, "disable_adapters"):
+            real_transformer.disable_adapters()
+        real_velocity = real_transformer(
+            hidden_states=noisy_latents.float(),
+            timestep=timesteps / 1000,
+            guidance=guidance,
+            pooled_projections=pooled_prompt_embeds.float(),
+            encoder_hidden_states=prompt_embeds.float(),
+            txt_ids=text_ids.float(),
+            img_ids=latent_image_ids.float(),
+            return_dict=False,
+        )[0]
+        if hasattr(real_transformer, "enable_adapters"):
+            real_transformer.enable_adapters()
+        sigma = append_dims(sigmas.squeeze().float(), noisy_latents.ndim).clamp_min(1e-4)
+        real_score = -(noisy_latents.float() + (1 - sigma) * real_velocity.float()) / sigma
+
+    sigma = append_dims(sigmas.squeeze().float(), noisy_latents.ndim).clamp_min(1e-4)
+    fake_score = -(noisy_latents.float() + (1 - sigma) * fake_velocity.float()) / sigma
+    grad = real_score - fake_score
+    grad = grad / torch.abs(real_score).mean(dim=tuple(range(1, real_score.ndim)), keepdim=True).clamp_min(1e-6)
+    grad = torch.nan_to_num(grad)
+
+    return 0.5 * F.mse_loss(clean_latents.float(), (clean_latents.float() - grad).detach(), reduction="mean")
+
+
 def load_text_encoders(class_one, class_two):
     text_encoder_one = class_one.from_pretrained(
         args.pretrained_teacher_model,
@@ -716,6 +820,15 @@ def parse_args():
     parser.add_argument("--s_ratio", default=0.3, type=float)
     parser.add_argument("--adv_weight", default=0.1, type=float)
     parser.add_argument("--adv_lr", default=1e-5, type=float)
+    parser.add_argument("--multiphase", default=4, type=int)
+    parser.add_argument("--RL_epsilon", default=None, type=float, help="Deprecated alias for --RL_epsilon_start.")
+    parser.add_argument("--RL_epsilon_start", default=1.0, type=float)
+    parser.add_argument("--RL_epsilon_final", default=0.1, type=float)
+    parser.add_argument("--RL_epsilon_decay_steps", default=20000, type=int)
+    parser.add_argument("--reward_baseline_beta", default=0.95, type=float)
+    parser.add_argument("--reward_scale", default=100.0, type=float)
+    parser.add_argument("--dmd_loss", action="store_true")
+    parser.add_argument("--dmd_weight", default=0.5, type=float)
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
@@ -848,6 +961,18 @@ def encode_prompt(
 
 
 def main(args):
+    RL_start_epoch = 10
+    RL_alpha = 0.1
+    RL_gamma = 0.9
+    n_state = math.factorial(args.multiphase)
+    if args.RL_epsilon is not None:
+        args.RL_epsilon_start = args.RL_epsilon
+    agent = QLearning(n_state, args.RL_epsilon_start, RL_alpha, RL_gamma, n_action=args.multiphase)
+    reward_baselines = [None] * args.multiphase
+    existing_phase_losses = []
+    phase_loss_list = [1.0] * args.multiphase
+    state = get_rank(phase_loss_list)
+
     if torch.backends.mps.is_available() and args.mixed_precision == "bf16":
         # due to pytorch#99272, MPS does not yet support bfloat16.
         raise ValueError(
@@ -890,6 +1015,8 @@ def main(args):
     if accelerator.is_main_process:
         if args.output_dir is not None:
             os.makedirs(args.output_dir, exist_ok=True)
+        action_history_file = open(os.path.join(args.output_dir, f"action_history_epsilon_{args.RL_epsilon_start}.txt"), "a")
+        state_history_file = open(os.path.join(args.output_dir, f"state_history_epsilon_{args.RL_epsilon_start}.txt"), "a")
 
     # 1. Load tokenizers from FLUX checkpoint.
     tokenizer_one = CLIPTokenizer.from_pretrained(
@@ -1342,6 +1469,7 @@ def main(args):
 
             initial_global_step = global_step
             first_epoch = global_step // num_update_steps_per_epoch
+            RL_start_epoch = initial_global_step + 10
     else:
         initial_global_step = 0
 
@@ -1394,7 +1522,29 @@ def main(args):
                 noise = torch.randn_like(model_input)
                 bsz = model_input.shape[0]
 
-                index = torch.randint(0, args.num_euler_timesteps, (bsz,), device=model_input.device).long()
+                action = None
+                if global_step >= RL_start_epoch:
+                    agent.epsilon = get_decayed_epsilon(
+                        args.RL_epsilon_start,
+                        args.RL_epsilon_final,
+                        args.RL_epsilon_decay_steps,
+                        global_step - RL_start_epoch,
+                    )
+                    action, mark = agent.take_action(state)
+                    if accelerator.is_main_process:
+                        action_history_file.write(f"{action}{mark}\n")
+                        action_history_file.flush()
+                        state_history_file.write(f"{state}\n")
+                        state_history_file.flush()
+                    index = sample_indices_from_phase(
+                        bsz,
+                        action,
+                        args.num_euler_timesteps,
+                        args.multiphase,
+                        model_input.device,
+                    )
+                else:
+                    index = torch.randint(0, args.num_euler_timesteps, (bsz,), device=model_input.device).long()
 
                 sigmas = extract_into_tensor(solver.sigmas, index, model_input.shape)
                 sigmas_prev = extract_into_tensor(solver.sigmas_prev, index, model_input.shape)
@@ -1549,16 +1699,30 @@ def main(args):
                 else:
                     # 20.4.13. Calculate loss
                     if args.loss_type == "l2":
-                        loss = F.mse_loss(
-                            model_pred.float(), target.float(), reduction="mean"
-                        )
+                        diff = model_pred.float() - target.float()
+                        per_sample_loss = diff.pow(2).mean(dim=tuple(range(1, diff.ndim)))
+                        loss = per_sample_loss.mean()
                     elif args.loss_type == "huber":
-                        loss = torch.mean(
-                            torch.sqrt(
-                                (model_pred.float() - target.float()) ** 2 + args.huber_c**2
-                            )
-                            - args.huber_c
-                        )
+                        diff = model_pred.float() - target.float()
+                        per_sample_loss = (
+                            torch.sqrt(diff**2 + args.huber_c**2) - args.huber_c
+                        ).mean(dim=tuple(range(1, diff.ndim)))
+                        loss = per_sample_loss.mean()
+                    phase_ids = torch.clamp(
+                        index * args.multiphase // args.num_euler_timesteps,
+                        max=args.multiphase - 1,
+                    )
+                    existing_phase_losses.append(
+                        {
+                            "phase": phase_ids.detach().cpu().numpy().tolist(),
+                            "loss": per_sample_loss.detach().cpu().numpy().tolist(),
+                        }
+                    )
+                    if len(existing_phase_losses) > args.RL_epsilon_decay_steps:
+                        existing_phase_losses = existing_phase_losses[-args.RL_epsilon_decay_steps:]
+                    phase_loss_list = update_phase_losses(existing_phase_losses, args.multiphase)
+                    next_state = get_rank(phase_loss_list)
+
                     g_loss = args.adv_weight * discriminator(
                         "g_loss",
                         fake_gan.float(),  # 注意 不需要packed
@@ -1572,7 +1736,39 @@ def main(args):
                     )
                     sum_of_parameters=sum(p.sum() for p in discriminator_params+transformer_lora_parameters)
                     zero_sum=sum_of_parameters*0.0
-                    loss += g_loss
+                    reward = 0.0
+                    if global_step >= RL_start_epoch and action is not None:
+                        pcm_loss_value = float(per_sample_loss.detach().mean().cpu())
+                        baseline_value = reward_baselines[action]
+                        if baseline_value is None:
+                            baseline_value = pcm_loss_value
+                        reward = args.reward_scale * (baseline_value - pcm_loss_value)
+                        reward_baselines[action] = (
+                            args.reward_baseline_beta * baseline_value
+                            + (1 - args.reward_baseline_beta) * pcm_loss_value
+                        )
+                        agent.update(state, action, reward, next_state)
+                    state = next_state
+                    if args.dmd_loss:
+                        unwrapped_transformer = accelerator.unwrap_model(transformer)
+                        real_transformer = unwrapped_transformer
+                        dmd_loss = args.dmd_weight * compute_flux_distribution_matching_loss(
+                            transformer,
+                            real_transformer,
+                            packed_noisy_model_input,
+                            model_pred,
+                            timesteps,
+                            sigmas,
+                            guidance,
+                            pooled_prompt_embeds,
+                            prompt_embeds,
+                            text_ids,
+                            latent_image_ids,
+                        )
+                        loss += g_loss + dmd_loss
+                    else:
+                        dmd_loss = torch.zeros((), device=loss.device, dtype=loss.dtype)
+                        loss += g_loss
                     loss+=zero_sum
                     accelerator.backward(loss)
                     if accelerator.sync_gradients:
@@ -1630,8 +1826,11 @@ def main(args):
                     }
                 else:
                     logs = {
-                        "loss_cm": loss.detach().item() - g_loss.detach().item(),
+                        "loss_cm": loss.detach().item() - g_loss.detach().item() - dmd_loss.detach().item(),
                         "g_loss": g_loss.detach().item(),
+                        "dmd_loss": dmd_loss.detach().item(),
+                        "rl_epsilon": agent.epsilon,
+                        "rl_reward": reward,
                         "lr": lr_scheduler.get_last_lr()[0],
                     }
                 progress_bar.set_postfix(**logs)

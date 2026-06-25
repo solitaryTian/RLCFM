@@ -119,10 +119,17 @@ def get_rank(lst):
     
     # 分配排名
     for i, (_, idx) in enumerate(sorted_lst):
-        rank[idx] = str(i)  # 将排名转换为字符串
-    perms = list(permutations('0123'))
-    mapping = {''.join(p): i+1 for i, p in enumerate(perms)}
-    return mapping[''.join(rank)]
+        rank[idx] = i
+    perms = list(permutations(range(len(lst))))
+    mapping = {p: i for i, p in enumerate(perms)}
+    return mapping[tuple(rank)]
+
+
+def get_decayed_epsilon(start, final, decay_steps, step):
+    if decay_steps <= 0:
+        return final
+    progress = min(max(step, 0), decay_steps) / decay_steps
+    return start + (final - start) * progress
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
@@ -1287,8 +1294,13 @@ def parse_args():
     parser.add_argument("--fake_guidance_scale", type=float, default=1)
     parser.add_argument("--sdxl", action="store_true")
     parser.add_argument("--dmd_loss", action="store_true")
-    parser.add_argument("--RL_epsilon", default=0.3, type=float)
-    parser.add_argument("--dmd_weight", default=0.3, type=float)
+    parser.add_argument("--RL_epsilon", default=None, type=float, help="Deprecated alias for --RL_epsilon_start.")
+    parser.add_argument("--RL_epsilon_start", default=1.0, type=float)
+    parser.add_argument("--RL_epsilon_final", default=0.1, type=float)
+    parser.add_argument("--RL_epsilon_decay_steps", default=20000, type=int)
+    parser.add_argument("--reward_baseline_beta", default=0.95, type=float)
+    parser.add_argument("--reward_scale", default=100.0, type=float)
+    parser.add_argument("--dmd_weight", default=0.5, type=float)
 
 
 
@@ -1357,7 +1369,10 @@ def main(args):
     RL_gamma = 0.9
     n_state = 24
 
-    agent = QLearning(n_state, args.RL_epsilon, RL_alpha, RL_gamma)
+    if args.RL_epsilon is not None:
+        args.RL_epsilon_start = args.RL_epsilon
+    agent = QLearning(n_state, args.RL_epsilon_start, RL_alpha, RL_gamma)
+    reward_baselines = [None] * args.multiphase
 
 
 
@@ -1944,6 +1959,12 @@ def main(args):
 
 
                 if global_step >= RL_start_epoch:
+                    agent.epsilon = get_decayed_epsilon(
+                        args.RL_epsilon_start,
+                        args.RL_epsilon_final,
+                        args.RL_epsilon_decay_steps,
+                        global_step - RL_start_epoch,
+                    )
                     action, mark = agent.take_action(state)
                     if accelerator.is_main_process:
                         file1.write(f"{action}{mark}\n") 
@@ -2147,9 +2168,9 @@ def main(args):
                     discriminator_optimizer.zero_grad(set_to_none=True)
                 else:
                     if args.loss_type == "l2":
-                        loss = F.mse_loss(
-                            model_pred.float(), target.float(), reduction="mean"
-                        )
+                        diff = model_pred.float() - target.float()
+                        temp_loss = diff.pow(2).mean(dim=tuple(range(1, diff.ndim)))
+                        loss = temp_loss.mean(dim=0)
                     elif args.loss_type == "huber":
                         diff = model_pred.float() - target.float()
                         temp_loss = torch.sqrt(diff**2 + args.huber_c**2) - args.huber_c  # 计算 Huber Loss
@@ -2189,7 +2210,16 @@ def main(args):
                 
                     if global_step >= RL_start_epoch:
                         next_state = get_rank(sub_loss_list)
-                        agent.update(state, action, g_loss, next_state)
+                        pcm_loss_value = float(temp_loss.detach().mean().cpu())
+                        baseline_value = reward_baselines[action]
+                        if baseline_value is None:
+                            baseline_value = pcm_loss_value
+                        reward = args.reward_scale * (baseline_value - pcm_loss_value)
+                        reward_baselines[action] = (
+                            args.reward_baseline_beta * baseline_value
+                            + (1 - args.reward_baseline_beta) * pcm_loss_value
+                        )
+                        agent.update(state, action, reward, next_state)
                         state = next_state
 
 
